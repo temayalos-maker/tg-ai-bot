@@ -16,7 +16,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 NEURAL_API_KEY = os.getenv('NEURAL_API_KEY')
 NEURAL_API_URL = 'https://api.neural-network.com/process'  # Замените на реальный URL API нейросети
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Например, https://your-service-name.onrender.com
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Например, https://tg-ai-bot-rug8.onrender.com
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -90,6 +90,10 @@ async def init_webhook():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
+
+    # Инициализация приложения
+    await app.initialize()
+    await app.start()
 
     # Настройка вебхука
     if WEBHOOK_URL:
