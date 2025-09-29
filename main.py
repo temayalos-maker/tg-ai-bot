@@ -4,7 +4,6 @@ import requests
 from aiogram import Bot, Dispatcher, types
 from aiohttp import web
 
-# === Настройки ===
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AI_API_URL = os.getenv("AI_API_URL")
 AI_API_KEY = os.getenv("AI_API_KEY")
@@ -14,9 +13,8 @@ WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}{WEBHOOK_PATH}"
 
 logging.basicConfig(level=logging.INFO)
 
-# Создаём бота и устанавливаем его как "текущий" для контекста
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-Bot.set_current(bot)  # ← ЭТО РЕШАЕТ ОШИБКУ
+Bot.set_current(bot)  # ← критически важно для aiogram v2
 dp = Dispatcher(bot)
 
 @dp.message_handler(commands=["start"])
