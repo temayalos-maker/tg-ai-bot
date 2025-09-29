@@ -1,62 +1,117 @@
 import os
 import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import requests
-from aiogram import Bot, Dispatcher, types
 from aiohttp import web
+from telegram.ext import Application
+from dotenv import load_dotenv
 
-# === НАСТРОЙКИ ===
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-AI_API_URL = os.getenv("AI_API_URL")
-AI_API_KEY = os.getenv("AI_API_KEY")
+# Настройка логирования
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-WEBHOOK_PATH = f"/webhook/{TELEGRAM_BOT_TOKEN}"
-WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}{WEBHOOK_PATH}"
+# Загрузка переменных окружения
+load_dotenv()
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+NEURAL_API_KEY = os.getenv('NEURAL_API_KEY')
+NEURAL_API_URL = 'https://api.neural-network.com/process'  # Замените на реальный URL API нейросети
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Например, https://your-app.onrender.com
 
-logging.basicConfig(level=logging.INFO)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
+    await update.message.reply_text('Привет! Я бот для обработки изображений с помощью нейросети. '
+                                   'Отправь мне фото, и я обработаю его по заданному промту!')
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-Bot.set_current(bot)
-dp = Dispatcher(bot)
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /help"""
+    await update.message.reply_text('Отправь мне изображение, и я обработаю его с помощью нейросети. '
+                                   'Используй /start для начала и /help для справки.')
 
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    await message.answer("Привет! Отправь мне фото для анализа.")
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик входящих изображений"""
+    if update.message.photo:
+        # Получаем файл самого высокого качества
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        file_path = file.file_path
 
-@dp.message_handler(content_types=types.ContentType.PHOTO)
-async def handle_photo(message: types.Message):
+        # Загружаем изображение
+        try:
+            response = requests.get(file_path)
+            response.raise_for_status()
+            image_data = response.content
+
+            # Подготавливаем данные для API нейросети (заглушка для промта)
+            prompt = "Пока заглушка, замените на ваш промт"  # Замените на реальный промт позже
+            headers = {
+                'Authorization': f'Bearer {NEURAL_API_KEY}',
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'image': image_data.hex(),  # Предполагаем, что API принимает изображение в формате hex
+                'prompt': prompt
+            }
+
+            # Отправляем запрос к API нейросети
+            neural_response = requests.post(NEURAL_API_URL, json=payload, headers=headers)
+            neural_response.raise_for_status()
+            result = neural_response.json()
+
+            # Предполагаем, что API возвращает обработанное изображение или текст
+            if 'processed_image' in result:
+                # Если API возвращает изображение (в формате base64, например)
+                import base64
+                processed_image = base64.b64decode(result['processed_image'])
+                await update.message.reply_photo(photo=processed_image)
+            else:
+                # Если API возвращает текст
+                await update.message.reply_text(result.get('text', 'Обработка завершена, но результат неясен.'))
+        except Exception as e:
+            logger.error(f"Ошибка при обработке изображения: {e}")
+            await update.message.reply_text('Произошла ошибка при обработке изображения. Попробуйте снова.')
+    else:
+        await update.message.reply_text('Пожалуйста, отправьте изображение.')
+
+async def webhook(request):
+    """Обработчик вебхуков для Render"""
     try:
-        photo = message.photo[-1]
-        file = await bot.get_file(photo.file_id)
-        file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file.file_path}"
-        img_data = requests.get(file_url).content
-
-        headers = {}
-        if AI_API_KEY:
-            headers["Authorization"] = f"Bearer {AI_API_KEY}"
-
-        # Отправляем фото в нейросеть
-        response = requests.post(AI_API_URL, headers=headers, data=img_data, timeout=60)
-
-        if response.status_code == 200:
-            result = response.json()
-            answer = str(result)
-        else:
-            answer = f"Ошибка API ({response.status_code})"
-        await message.answer(answer)
-
+        update = Update.de_json(await request.json(), app.bot)
+        await app.process_update(update)
+        return web.Response(status=200)
     except Exception as e:
-        await message.answer(f"Ошибка бота: {str(e)}")
+        logger.error(f"Ошибка в вебхуке: {e}")
+        return web.Response(status=500)
 
-async def webhook_handler(request):
-    if request.path == WEBHOOK_PATH:
-        update = await request.json()
-        await dp.process_update(types.Update(**update))
-        return web.Response()
-    return web.Response(status=403)
+async def init_webhook():
+    """Инициализация вебхука"""
+    global app
+    app = Application.builder().token(BOT_TOKEN).build()
 
-app = web.Application()
-app.router.add_post(WEBHOOK_PATH, webhook_handler)
+    # Регистрация обработчиков
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_image))
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    web.run_app(app, host="0.0.0.0", port=port)
+    # Настройка вебхука
+    await app.bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
+
+def main():
+    """Основная функция для запуска бота"""
+    if not BOT_TOKEN or not NEURAL_API_KEY or not WEBHOOK_URL:
+        logger.error("BOT_TOKEN, NEURAL_API_KEY или WEBHOOK_URL не установлены")
+        return
+
+    # Инициализация aiohttp сервера
+    web_app = web.Application()
+    web_app.router.add_post(f"/{BOT_TOKEN}", webhook)
+    
+    # Запуск приложения
+    web.run_app(web_app, host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
+
+if __name__ == '__main__':
+    # Инициализация вебхука при старте
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(init_webhook())
+    main()
