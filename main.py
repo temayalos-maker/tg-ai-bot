@@ -4,7 +4,6 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import requests
 from aiohttp import web
-from telegram.ext import Application
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -16,7 +15,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 NEURAL_API_KEY = os.getenv('NEURAL_API_KEY')
 NEURAL_API_URL = 'https://api.neural-network.com/process'  # Замените на реальный URL API нейросети
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Например, https://your-app.onrender.com
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Например, https://your-service-name.onrender.com
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -60,12 +59,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Предполагаем, что API возвращает обработанное изображение или текст
             if 'processed_image' in result:
-                # Если API возвращает изображение (в формате base64, например)
                 import base64
                 processed_image = base64.b64decode(result['processed_image'])
                 await update.message.reply_photo(photo=processed_image)
             else:
-                # Если API возвращает текст
                 await update.message.reply_text(result.get('text', 'Обработка завершена, но результат неясен.'))
         except Exception as e:
             logger.error(f"Ошибка при обработке изображения: {e}")
@@ -94,7 +91,12 @@ async def init_webhook():
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
 
     # Настройка вебхука
-    await app.bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
+    if WEBHOOK_URL:
+        await app.bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
+        logger.info(f"Вебхук установлен на {WEBHOOK_URL}/{BOT_TOKEN}")
+    else:
+        logger.error("WEBHOOK_URL не установлен")
+        raise ValueError("WEBHOOK_URL не установлен")
 
 def main():
     """Основная функция для запуска бота"""
@@ -106,8 +108,9 @@ def main():
     web_app = web.Application()
     web_app.router.add_post(f"/{BOT_TOKEN}", webhook)
     
-    # Запуск приложения
-    web.run_app(web_app, host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
+    # Запуск приложения на порту, указанном Render
+    port = int(os.getenv('PORT', 10000))  # Render по умолчанию использует порт 10000
+    web.run_app(web_app, host='0.0.0.0', port=port)
 
 if __name__ == '__main__':
     # Инициализация вебхука при старте
